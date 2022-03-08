@@ -16,50 +16,54 @@ vector<string> DIR_STRINGS = {"UP", "RIGHT", "DOWN", "LEFT"};
 // vector<string> DIR_STRINGS = {"DOWN", "LEFT", "UP", "RIGHT"};
 // vector<string> DIR_STRINGS = {"RIGHT", "UP", "LEFT", "DOWN"};
 
+
 class State{
 public:
-    State(){
-        for (int i = 0; i < BX; i++){
-            for (int j = 0; j < BY; j++){
-                board[i][j] = 0;
-            }
-        }
 
-    }
-    
-    void initialize(int num_players, int player_idx){
+    State(int num_players, vector<pair<int, int>> positions){
+        this->positions = positions;
         this->num_players = num_players;
-        this->player_idx = player_idx;
-        positions = vector<pair<int, int>>(num_players);
-    }   
-
-    void print_board(){
-        for(int i = 0; i < BX; i++){
-            for(int j = 0; j < BY; j++){
-                cerr <<(int) board[i][j];
-            }
-            cerr << endl;
-        }
-        cerr << endl;
     }
 
-    void kill_dead(vector<int>& dead){
-        if(dead.size() == 0){
-            return;
-        }
-        for(int i = 0; i < BX; i++){
-            for(int j = 0; j < BY; j++){
-                for(int k = 0; k < dead.size(); k++){
-                    if(board[i][j] == dead[k] + 1){
-                        board[i][j] = 0;
-                    }
-                    break;
-                }
-            }
-        }
+
+    void apply_move(int player_idx, int dir){
+        int x = positions[player_idx].first;
+        int y = positions[player_idx].second;
+        positions[player_idx].first += DIRS[dir][0];
+        positions[player_idx].second += DIRS[dir][1];
+        board[x][y] = player_idx + 1;
     }
 
-    bool in_bounds(int x, int y, int dir){
+    void kill(int player_idx){
+        
+        int x = positions[player_idx].first;
+        int y = positions[player_idx].second;
+        board[x][y] = 0;
+    }
+
+    State copy(){
+        State s(num_players, positions);
+        for(int i = 0; i < BX; i++){
+            for(int j = 0; j < BY; j++){
+                s.board[i][j] = board[i][j];
+            }
+        }
+        return s;
+    }
+
+    vector<int> available_moves(int player_idx){
+        vector<int> moves;
+        for(int i = 0; i < 4; i++){
+            if(is_allowed(positions[player_idx].first, positions[player_idx].second, i)){
+                moves.push_back(i);
+            }
+        }
+        return moves;
+    }
+
+private:
+
+    bool is_allowed(int x, int y, int dir){
         int dirx = DIRS[dir][0];
         int diry = DIRS[dir][1];
         int nx = x + dirx;
@@ -73,200 +77,86 @@ public:
         return false;
 
     }
+    char board[BX][BY];
+    vector<pair<int,int>> positions;
+    int num_players;
+    set<int> dead;
+};
 
-    int num_reachable(int x, int y, int dir){
-        int dirx = DIRS[dir][0];
-        int diry = DIRS[dir][1];
-        int nx = x + dirx;
-        int ny = y + diry;
-        int count = 0;
+class Heuristic{
+public:
+    int evaluate(State& state){
+        return 0;
+    }
+};
 
-        queue<pair<int, int>> q;
 
-        // run dfs to see how many squares are reachable
-        // q.push_back(make_pair(nx, ny));
-        q.push(make_pair(nx, ny));
-        set<pair<int, int>> visited;
-        
-        pair<int, int> pos;
-        while(q.size() > 0){
-            
-            pos = q.front();
-            int cur_x = pos.first;
-            int cur_y = pos.second;
-            q.pop();
+class Agent{
 
-            // if(board[cur_x][cur_y] == 0 && visited.find(pos) == visited.end()){
-            //     count++;
-            // }
+public:
+    int num_players;
+    State * state;
 
-            for(int i = 0; i < 4; i++){
-                int nx2 = cur_x + DIRS[i][0];
-                int ny2 = cur_y + DIRS[i][1];
-                if(in_bounds(cur_x, cur_y, i) && visited.find(make_pair(nx2, ny2)) == visited.end() && (nx2 != nx || ny2 != ny)) {
-                    q.push(make_pair(nx2, ny2));
-                    visited.insert(make_pair(nx2, ny2));
-                    count++;
-                }
-            }
-        }
+    Agent(){
 
-        return count;
     }
 
-    int enemy_reachable(pair<int,int> &new_position, int player_idx){
-        // Get the direction the enemy is facing
-        int x = new_position.first;
-        int y = new_position.second;
-        int dir_x = x - positions[player_idx].first;
-        int dir_y = y - positions[player_idx].second;
+    ~Agent(){
+        delete state;
+    }
 
-        int dir_idx = -1;
-        for(int i = 0; i < 4; i++){
-            if(DIRS[i][0] == dir_x && DIRS[i][1] == dir_y){
-                dir_idx = i;
+    void initialize(int num_players, int player_idx, vector<pair<int, int>>& positions){
+        this->num_players = num_players;
+        this->state = new State(num_players, positions);
+    }
+
+    string get_move(int player_idx){
+        return "";
+    }
+
+    pair<int,int> negamax(State &state, int depth, int alpha, int beta){
+        pair<bool, int> term = state.is_terminal();
+        if(term.first){
+            // cout << "value: " << -term.second << " " << state.turn << endl;
+            // state.print_board();
+            return pair<int,int>(-1,-term.second);
+        }
+
+        if(depth == 0){
+            return pair<int, int>()
+        }
+
+
+        vector<pair<int, int>> moves = state.get_available_moves();
+        int value = -100;
+        pair<int, int> best_move;
+        for(auto &child: moves){
+            state.move(child.first, child.second);
+            pair<pair<int, int>,int> result = negamax(state, -beta, -alpha);
+            state.undo_move(child.first, child.second);
+            if(-result.second > value){
+                value = -result.second;
+                best_move = child;
+            }
+            alpha = max(alpha, value);
+            if(alpha >= beta){
                 break;
             }
         }
-        int max_reachable = -1;
-        int reachable = 0;
-        int idx = 0;
-        for(int i = -1; i < 2; i++){
-            idx = ((dir_idx + i) % 4 + 4) % 4;
-            if(in_bounds(x,y, idx)){
-                reachable = num_reachable(x, y, idx);
-                if(reachable > max_reachable){
-                    max_reachable = reachable;
-                }
-            }
-        }
-        return max_reachable;
+
+        // cout << endl;
+        // state.print_board();
+        // cout << endl;
+
+
+        return pair<pair<int, int>,int>(best_move, value);
     }
-
-    string select_move(vector<vector<int>> player_states){
-
-        vector<pair<int, int>> new_positions = vector<pair<int, int>>(num_players);
-        vector<int> dead = {};
-        for(int i = 0; i < num_players; i++){
-            if(player_states[i][0] == -1){
-                dead.push_back(i);
-            }
-            else{
-                board[player_states[i][2]][player_states[i][3]] = i + 1;
-                board[player_states[i][0]][player_states[i][1]] = i + 1;
-                new_positions[i] = make_pair(player_states[i][2], player_states[i][3]);
-            }
-        }
-
-        kill_dead(dead);
-
-
-        int newx = new_positions[player_idx].first;
-        int newy = new_positions[player_idx].second;
-
-        int currx = positions[player_idx].first;
-        int curry = positions[player_idx].second;
-
-        // cout << "newx: " << newx << " newy: " << newy << endl;
-
-        int ret_idx = -1;
-
-        if(!initialized || (newx == currx && newy == curry)){
-            // Find any direction
-            initialized = true;
-            for(int i = 0; i< 4; i++){
-                if(in_bounds(newx, newy, i)){
-                    // cout << currx << " " << curry << endl;
-                    ret_idx =  i;
-                }
-            }
-        } else {
-            // Use an allowed direction
-            int dir_x = newx - currx;
-            int dir_y = newy - curry;
-            // int dir_x = currx - newx ;
-            // int dir_y = curry - newy;
-
-            // cout << dir_x << " " << dir_y << endl;
-            // Find the direction index
-            int dir_idx = -1;
-            for(int i = 0; i < 4; i++){
-                if(DIRS[i][0] == dir_x && DIRS[i][1] == dir_y){
-                    dir_idx = i;
-                    break;
-                }
-            }
-
-            cerr << "facing dir " << DIR_STRINGS[dir_idx] << ": [" <<dir_x << " " << dir_y << "]" << endl;
-            // cerr <<  << endl;
-            int max_reachable = 1 << 31;
-            for(int i = -1; i < 2; i++){
-                int check_dir = ((dir_idx + i) % 4 + 4) % 4;
-                cerr << "Checking " << DIR_STRINGS[check_dir] << endl;
-                
-                if(in_bounds(newx, newy, check_dir)){
-                    int score = num_reachable(newx, newy, check_dir);
-                    int hypo_x = newx + DIRS[check_dir][0];
-                    int hypo_y = newy + DIRS[check_dir][1];
-                    board[hypo_x][hypo_y] = player_idx + 1;
-                    for(int i = 0; i < num_players; i++){
-                        if(i != player_idx){
-                            score -= enemy_reachable(new_positions[i], i);
-                        }
-                        // score -= enemy_reachable()
-                    }
-                    board[hypo_x][hypo_y] = 0;
-
-                    
-                    cerr << "score: " << score << endl;
-                    if(score > max_reachable){
-                        max_reachable = score;
-                        ret_idx = check_dir;
-                    }
-                    // if(board[newx + DIRS[check_dir][0]][newy + DIRS[check_dir][1]] == 0){
-                    // ret_idx =  check_dir;
-                }
-            }
-        }
-        // currx = newx;// + DIRS[check_dir][0];
-        // curry = newy;// + DIRS[check_dir][1];
-        for(int i = 0; i < num_players; i++){
-            positions[i] = new_positions[i];
-        }
-
-        if(ret_idx == -1){
-            ret_idx = 0;
-        }
-
-        cerr << "Expected next square = " << (int)currx + DIRS[ret_idx][0] << " " << (int)curry + DIRS[ret_idx][1] << endl;
-        return DIR_STRINGS[ret_idx];
-
-
-
-
-    }
-
-
-
-    int num_players;
-    int player_idx;
-
-    bool initialized = false;
-    // int currx;
-    // int curry;
-    // vector<pair
-    vector<pair<int,int>> positions;
-
-    char board[BX][BY];
+        
 };
 
-/**
- * Auto-generated code below aims at helping you parse
- * the standard input according to the problem statement.
- **/
 
-int main()
-{
+
+int main(){
     bool initialized = false;
     State state = State();
     
@@ -277,10 +167,6 @@ int main()
         int p; // your player number (0 to 3).
 
         cin >> n >> p; cin.ignore();
-        if(!initialized){
-            state.initialize(n, p);
-            initialized = true;
-        }
 
         vector<vector<int>> player_states(n);
         for (int i = 0; i < n; i++) {
@@ -309,5 +195,4 @@ int main()
 
         cout << move << endl; // A single line with UP, DOWN, LEFT or RIGHT
     }
-
 }
