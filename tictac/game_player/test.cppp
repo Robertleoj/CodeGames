@@ -1,0 +1,49 @@
+#include<iostream>
+#include<stdio.h>
+#include<string>
+#include "popen2.h"
+using namespace std;
+
+
+int main(){
+    string cmd = "./player1";
+    int ofp;
+    int ifp;
+    int pid;
+    if(pid = popen2(cmd.c_str(), &ofp, &ifp) < 0){
+        cout << "error" << endl;
+        return -1;
+    }
+    cout << "here" << endl;
+    cout << pid << endl;
+    // fputs("-1 -1", ofp);
+    // write(ifp, "-1 -1\n", 4);
+    // cout << (ofp == NULL);
+
+    int x, y;
+    string s;
+    char buf[100];
+    int n;
+    bool anotha = true;
+    while(anotha){
+        n = 0;
+        cin >> x >> y;
+        s = to_string(x) + " " + to_string(y) + "\n";
+        write(ofp, s.c_str(), s.length());
+        write(ofp, "0\n", 2);
+        while(n == 0){
+            n = read(ifp, buf, 100);
+        }
+        for(int i = 0; i < n; i++){
+            cout << buf[i];
+        }
+
+        cout << "Anotha?";
+        cin >> anotha;
+    }
+    // int i;
+    // cin >> i;
+
+    close(ofp);
+    close(ifp);
+}
