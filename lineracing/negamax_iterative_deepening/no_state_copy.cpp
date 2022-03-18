@@ -11,31 +11,51 @@
 #define BY 20
 
 #define PLAY_CLOCK 100
-#define TIME_SLACK 10
+#define TIME_SLACK 25
 
 #define MIN_HEURISTIC -10000
 #define MAX_HEURISTIC 10000
+
+#define SHOW_LINES 0
+
+#define ERROR_CHECKS 0
+
 
 int DIRS[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
 
 using namespace std;
 
 vector<string> DIR_STRINGS = {"UP", "RIGHT", "DOWN", "LEFT"};
-// vector<string> DIR_STRINGS = {"DOWN", "RIGHT", "UP", "LEFT"};
-// vector<string> DIR_STRINGS = {"DOWN", "LEFT", "UP", "RIGHT"};
-// vector<string> DIR_STRINGS = {"RIGHT", "UP", "LEFT", "DOWN"};
+
+pair<int, int> die_move(){
+
+    return make_pair(-1, -1);
+}
+
+
+
+
 
 template <class T>
 bool el_in_set(set<T> s, T e){
     return s.find(e) != s.end();
 }
 
+int timer;
 
 class TimeOutException : public exception {
     virtual const char* what() const throw() {
         return "TimeOutException";
     }
 } timeOutException;
+
+double time_elapsed(){
+    return (double) ( 1000 *(clock() - timer)) / CLOCKS_PER_SEC;
+}
+
+bool time_out(){
+    return (time_elapsed() + TIME_SLACK) > PLAY_CLOCK;
+}
 
 
 
@@ -48,17 +68,51 @@ public:
     int num_players;
     set<int> dead;
 
-    State(int num_players, vector<pair<int, int>> positions){
-        this->positions = positions;
-        this->num_players = num_players;
-        // this->move_sequences = vector<vector<pair<int, int>>>(num_players);
+    State(int num_players, vector<vector<int>> player_states){
+
+        // Initialize num players, positions, and move sequences
+        this-> num_players = num_players;
+        this->positions = vector<pair<int, int>>();
+        this->move_sequences = vector<vector<pair<int, int>>>(num_players);
+
+        // go throuh each player's state
+        for(int i = 0; i < num_players; i++){
+            // Initialize vector in move_sequences
+            this->move_sequences[i] = vector<pair<int, int>>();
+
+            // Get coordinates
+            int fst_x = player_states[i][0];
+            int fst_y = player_states[i][1];
+            int snd_x = player_states[i][2];
+            int snd_y = player_states[i][3];
+
+            // Add first coordinate to the move sequence
+            this->move_sequences[i].push_back(make_pair(fst_x, fst_y));
+
+            // If the second coordinate is different, add it to the move sequence
+            if(fst_x != snd_x || fst_y != snd_y){
+                this->move_sequences[i].push_back(make_pair(snd_x, snd_y));
+            }
+
+            // Set the position to the second coordinate
+            this->positions.push_back(make_pair(snd_x, snd_y));
+        }
+
     }
 
-    State(int num_players, vector<pair<int, int>> positions, char board[BX][BY]){
+    State(int num_players, vector<pair<int, int>> positions){
+        this->positions = vector<pair<int, int>>();
+        this->num_players = num_players;
+        this->move_sequences = vector<vector<pair<int, int>>>(num_players);
+        for(int i = 0; i < num_players; i++){
+            this->move_sequences[i] = vector<pair<int, int>>();
+        }
         for(auto pos: positions){
             this->positions.push_back(pos);
         }
-        this->num_players = num_players;
+    }
+
+    State(int num_players, vector<pair<int, int>> positions, char board[BX][BY]): State(num_players, positions){
         for(int i = 0; i < BX; i++){
             for(int j = 0; j < BY; j++){
                 this->board[i][j] = board[i][j];
@@ -66,18 +120,25 @@ public:
         }
     }
 
-    State move_applied(pair<int, int> move,int player_idx){
+    // State move_applied(pair<int, int> move,int player_idx){
 
-        // State s = State(this->num_players, this->positions, this->board);
-        State s = this->copy();
-        s.apply_move(move, player_idx);
-        return s;
-    }
+    //     // State s = State(this->num_players, this->positions, this->board);
+    //     State s = this->copy();
+    //     s.apply_move(move, player_idx);
+    //     return s;
+    // }
 
     State copy(){
         State s(num_players, positions, board);
         for(auto p : dead){
             s.dead.insert(p);
+        }
+
+        // copy move sequence
+        for(int i = 0; i < num_players; i++){
+            for(auto m : move_sequences[i]){
+                s.move_sequences[i].push_back(m);
+            }
         }
         return s;
     }
@@ -94,6 +155,7 @@ public:
             0 <= x && x < BX && 0 <= y && y < BY
         );
     }
+
     bool suicide_move(pair<int,int> move){
         // cerr << "Sucide move made" << endl;
         if(!in_bounds(move)){
@@ -110,12 +172,7 @@ public:
 
 
     int num_reachable(pair<int, int> pos){
-        // int dirx = DIRS[dir][0];
-        // int diry = DIRS[dir][1];
-        // int nx = x + dirx;
-        // int ny = y + diry;
 
-        // int cur_x = pos.first, cur_y = pos.second;
         int x = pos.first, y = pos.second;
         // Take the max count over all directions we can move in
 
@@ -154,16 +211,66 @@ public:
         return count;
     }
 
+    vector<int> num_reachable2(){
+        // simultaneous bfs
+
+        vector<queue<pair<int, int>>> qs(num_players);
+        set<pair<int, int>> visited;
+        vector<int> counts(num_players);
+
+        for(int i = 0; i < num_players; i++){
+            if(!is_dead(i)){
+                qs[i].push(positions[i]);
+                visited.insert(positions[i]);
+                counts[i] = 0;
+            }
+        }
+
+        bool all_empty = false;
+
+
+        while(!all_empty){
+            if(time_out()){
+                throw timeOutException;
+            }
+            all_empty = true;
+            for(int i = 0; i < num_players; i++){
+                if(qs[i].size() > 0){
+                    all_empty = false;
+                    pair<int, int> c_pos = qs[i].front();
+                    int cur_x = c_pos.first;
+                    int cur_y = c_pos.second;
+                    qs[i].pop();
+
+                    for(int j = 0; j < 4; j++){
+                        int nx = cur_x + DIRS[j][0];
+                        int ny = cur_y + DIRS[j][1];
+                        if(!suicide_move(nx, ny) && visited.find(make_pair(nx, ny)) == visited.end()){
+                            auto p = make_pair(nx, ny);
+                            qs[i].push(p);
+                            visited.insert(p);
+                            counts[i] ++;
+                        }
+                    }
+                }
+            }
+        }
+
+
+        return counts;
+
+    }
+
 
 
     void apply_move(pair<int, int> move,int player_idx){
 
-        if(move.first == -1 && move.second == -1){
-            if(!is_dead(player_idx)){
-                this->kill(player_idx);
-            }
+        if(move == die_move() || move.first == -1 || move.second == -1){
+            this->kill(player_idx);
+            this->move_sequences[player_idx].push_back(die_move());
             return;
         }
+
         if(is_dead(player_idx)){
             return;
         }
@@ -171,17 +278,46 @@ public:
         if(el_in_set(dead, player_idx)){
             throw runtime_error("Agent already dead");
         }
+
         if(suicide_move(move)){
-            cerr << "Sucide move made" << endl;
+            cerr << "Suicide move made" << endl;
             this->kill(player_idx);
+            this->move_sequences[player_idx].push_back(die_move());
         } else {
             this->positions[player_idx] = move;
             this->board[move.first][move.second] = player_idx + 1;
+            for(int i = 0; i < this->num_players; i++){
+                cerr << this-> move_sequences[i].size() << " ";
+            }
+            cerr << endl;
+            this->move_sequences[player_idx].push_back(move);
+        }
+    }
+
+    void revive(int player_idx){
+        for(auto &p : this->move_sequences[player_idx]){
+            if(p == die_move()){
+                break;
+            }
+            this->board[p.first][p.second] = player_idx + 1;
+        }
+        this->dead.erase(player_idx);
+    }
+
+    void undo_move(int player_idx){
+        auto last_move = this->move_sequences[player_idx].back();
+        this->move_sequences[player_idx].pop_back();
+        if(last_move == die_move() && is_dead(player_idx)){
+            this->revive(player_idx);
+        } else {
+            this->board[last_move.first][last_move.second] = 0;
+            this->positions[player_idx] = this->move_sequences[player_idx].back();
         }
     }
 
 
     void kill(int player_idx){
+        // if(ERROR_CHECKS){
         if(el_in_set(dead, player_idx)){
             throw runtime_error("Already dead");
         }
@@ -196,32 +332,8 @@ public:
     }
 
 
-
-    vector<int> available_moves(int player_idx){
-        vector<int> moves;
-        for(int i = 0; i < 4; i++){
-            if(is_allowed(positions[player_idx].first, positions[player_idx].second, i)){
-                moves.push_back(i);
-            }
-        }
-        return moves;
-    }
-
-
     bool is_allowed(int x, int y, int dir){
-        // int dirx = DIRS[dir][0];
-        // int diry = DIRS[dir][1];
-        // int nx = x + dirx;
-        // int ny = y + diry;
         return !suicide_move(x + DIRS[dir][0], y + DIRS[dir][1]);
-        // if(nx < 0 || nx >= BX || ny < 0 || ny >= BY){
-            // return false;
-        // }
-        // if(board[nx][ny] == 0){
-            // return true;
-        // }
-        // return false;
-
     }
 
 
@@ -235,10 +347,12 @@ public:
                     ret_vect[i] = MAX_HEURISTIC;
                 }
             }
-            for(auto i: ret_vect){
-                if(abs(i) >  MAX_HEURISTIC){
-                    cerr << "Invalid heuristic: terminal heuristic" << endl;
-                    throw runtime_error("Invalid heuristic");
+            if(ERROR_CHECKS){
+                for(auto i: ret_vect){
+                    if(abs(i) >  MAX_HEURISTIC){
+                        cerr << "Invalid heuristic: terminal heuristic" << endl;
+                        throw runtime_error("Invalid heuristic");
+                    }
                 }
             }
             return make_pair(true, ret_vect);
@@ -247,11 +361,9 @@ public:
         }
     }
 
-
     bool is_dead(int player_idx){
         return el_in_set(dead, player_idx);
     }
-
 
     void print_board(){
         for(int i = 0; i < BX; i++){
@@ -279,10 +391,21 @@ public:
     }
 
 
-    void fill_position(pair<int, int> pos, int player_idx){
-        // for(int i = 0; i < positions.size(); i++){
+    // void fill_square(pair<int, int> pos, int player_idx){
+    //     if(pos.first == -1 || pos.second == -1){
+    //         return;
+    //     }
+    //     this->board[pos.first][pos.second] = player_idx + 1;
+    // }
+
+    void set_starting_square(pair<int, int> pos, int player_idx){
+        if(pos.first == -1 || pos.second == -1){
+            return;
+        }
         this->board[pos.first][pos.second] = player_idx + 1;
-        // }
+        if(this->move_sequences[player_idx].size() == 0 || this->move_sequences[player_idx].front() != pos){
+            this->move_sequences[player_idx].insert(this->move_sequences[player_idx].begin(), pos);
+        }
     }
 
 
@@ -293,45 +416,54 @@ public:
     // int max_h = 1000;
     // int min_h= -1000;
 
+    // vector<int> evaluate(State& state){
+    //     vector<int> vec(state.num_players, 0);
+    //     vector<int> reachable(state.num_players, 0);
+    //     for(int i = 0; i < state.num_players; i++){
+    //         if(!state.is_dead(i)){
+    //             reachable[i] = state.num_reachable(state.positions[i]);
+    //         } else {
+    //             reachable[i] = 0;
+    //         }
+    //     }
+
+    //     // cerr << "Reachable: ";
+    //     // for(int i = 0; i < state.num_players; i++){
+    //     //     cerr << reachable[i] << " ";
+    //     // }
+
+    //     // cerr << "Reachable: ";
+    //     for(int i = 0; i < state.num_players; i++){
+    //         if(!state.is_dead(i)){
+    //             for(int j = 0; j < state.num_players; j++){
+    //                 if(i != j && !state.is_dead(j)){
+    //                     vec[i] -= reachable[j];
+    //                 } else if (i == j){
+    //                     vec[i] += reachable[j];
+    //                 }
+    //             }
+    //             if(abs(vec[i]) > MAX_HEURISTIC){
+    //                 cerr << "Invalid heuristic : reachable heuristic" << endl;
+    //                 throw runtime_error("Invalid heuristic");
+    //             }
+    //         } else {
+    //             vec[i] = MIN_HEURISTIC;
+    //         }
+    //         // cerr << reachable[i] << " ";
+    //     }
+    //     // cerr << endl;
+
+    //     return vec;
+
+    // }
+
     vector<int> evaluate(State& state){
-        vector<int> vec(state.num_players, 0);
-        vector<int> reachable(state.num_players, 0);
-        for(int i = 0; i < state.num_players; i++){
-            if(!state.is_dead(i)){
-                reachable[i] = state.num_reachable(state.positions[i]);
-            } else {
-                reachable[i] = 0;
-            }
+        vector<int> ret = state.num_reachable2();
+        for(auto p: state.dead){
+            ret[p] = MIN_HEURISTIC;
         }
 
-        // cerr << "Reachable: ";
-        // for(int i = 0; i < state.num_players; i++){
-        //     cerr << reachable[i] << " ";
-        // }
-
-        // cerr << "Reachable: ";
-        for(int i = 0; i < state.num_players; i++){
-            if(!state.is_dead(i)){
-                for(int j = 0; j < state.num_players; j++){
-                    if(i != j && !state.is_dead(j)){
-                        vec[i] -= reachable[j];
-                    } else if (i == j){
-                        vec[i] += reachable[j];
-                    }
-                }
-                if(abs(vec[i]) > MAX_HEURISTIC){
-                    cerr << "Invalid heuristic : reachable heuristic" << endl;
-                    throw runtime_error("Invalid heuristic");
-                }
-            } else {
-                vec[i] = MIN_HEURISTIC;
-            }
-            // cerr << reachable[i] << " ";
-        }
-        // cerr << endl;
-
-        return vec;
-
+        return ret;
     }
 
     int min_heuristic(){
@@ -351,34 +483,37 @@ public:
     State * state;
     Heuristic *h;
 
-    int timer;
 
     Agent(){
 
     }
 
     ~Agent(){
-        delete state;
-        delete h;
+        // delete state;
+        // delete h;
     }
 
-    void initialize(int num_players, vector<pair<int, int>>& positions){
-        this->num_players = num_players;
-        this->state = new State(num_players, positions);
+    void initialize(int num_players, vector<vector<int>> states){
+        // vector<pair<int, int>> positions;
+        // for(int i = 0; i < num_players; i++){
+        //     positions.push_back(make_pair(states[i][2], states[i][3]));
+        // }
+        // this->num_players = num_players;
+        this->state = new State(num_players, states);
+
+        // for(int i = 0; i < num_players; i++){
+        //     auto init_pos = make_pair(states[i][0], states[i][1]);
+        //     if(init_pos != positions[i]){
+        //         this->state->set_starting_square(make_pair(states[i][0], states[i][1]), i);
+        //     }
+
         this->h = new Heuristic();
     }
 
-    // void fill_squares(vector<pair<int, int>> positions){
-        // this->state->fill_positions(positions);
-    // }
 
     void update(vector<vector<int>> states){
         for(int i = 0; i < states.size(); i ++ ){
             this->state->apply_move(pair<int,int>(states[i][2], states[i][3]), i);
-        }
-        for(int i = 0; i < states.size(); i ++){
-            this->state->fill_position(pair<int, int>(states[i][0], states[i][1]), i);
-
         }
     }
 
@@ -395,7 +530,19 @@ public:
                 return DIR_STRINGS[i];
             }
         }
-        cerr << "Invalid move" << endl;
+
+
+        cerr << "Invalid move. Player:  " 
+             << player_idx  
+             << " moving from "
+             << state->positions[player_idx].first 
+             <<" " 
+             << state->positions[player_idx].second
+             << " to "
+             << move.first << " " << move.second << endl;
+        cerr << "On board" << endl;
+        this->state->print_board();
+
         throw runtime_error("Invalid move");
     }
 
@@ -403,15 +550,7 @@ public:
         return make_pair(-1, -1);
     }
 
-    double time_elapsed(){
-        return (double) ( 1000 *(clock() - timer)) / CLOCKS_PER_SEC;
-    }
-
-    bool time_out(){
-        return (time_elapsed() + TIME_SLACK) > PLAY_CLOCK;
-    }
-
-    pair<pair<int, int>,vector<int>> minimax_mult(State s, int depth, int player_idx, int main_player){
+    pair<pair<int, int>,vector<int>> minimax_mult(State &s, int depth, int player_idx, int main_player){
         // cout << "Depth: " << depth << endl;
         // cout << "Player: " << player_idx << endl;
         // s.print_board();
@@ -434,7 +573,7 @@ public:
         if(s.is_dead(main_player)){
             vector<int> ret_vect = vector<int>(s.num_players);
             for(int i = 0; i < s.num_players; i++){
-                if(!s.is_dead(i)){
+                if(s.is_dead(i)){
                     ret_vect[i] = MIN_HEURISTIC;
                 } else {
                     ret_vect[i] = MAX_HEURISTIC;
@@ -466,16 +605,27 @@ public:
 
         // cerr << __LINE__ << endl;
         if(s.is_dead(player_idx)){
-            return minimax_mult(s, depth + 1, (player_idx + 1) % num_players, main_player);
+            return minimax_mult(s, depth - 1, (player_idx + 1) % num_players, main_player);
         }
 
 
         // cerr << __LINE__ << endl;
         vector<pair<int, int>> moves = s.get_available_moves(player_idx);
+        cerr << "Got available moves for player " << player_idx << endl;
+        for (auto m : moves){
+            cerr << m.first << " " << m.second << endl;
+        }
+        cerr  << "from " << s.positions[player_idx].first << " " << s.positions[player_idx].second << endl;
+
+        cerr << "On board" << endl;
+        s.print_board();
+
         if(moves.size() == 0){
-            s.kill(player_idx);
             cerr << "Found no moves" << endl;
-            return minimax_mult(s, depth + 1, (player_idx + 1) % num_players, main_player);
+            s.apply_move(die_move(), player_idx);
+            auto res = minimax_mult(s, depth - 1, (player_idx + 1) % num_players, main_player);
+            s.undo_move(player_idx);
+            return make_pair(die_move(), res.second);
         }
 
 
@@ -485,13 +635,15 @@ public:
         pair<int, int> best_move;
         best_move = moves[0];
         // cerr << __LINE__ << endl;
-        for(auto &move: moves){
+        for(auto move: moves){
+            s.apply_move(move, player_idx);
             pair<pair<int, int>,vector<int>> result = minimax_mult(
-                s.move_applied(move, player_idx), 
+                s,
                 depth - 1, 
                 (player_idx + 1) % num_players,
                 main_player
             );
+            s.undo_move(player_idx);
             if(result.second[player_idx] > value){
                 value = result.second[player_idx];
                 value_vec = result.second;
@@ -511,36 +663,38 @@ public:
     string get_move(int player_idx){
         string best_move = "";
 
-        timer = clock();
+        // timer = clock();
         int depth = 1;
 
         // bool found = false;
         string bst = "";
+        cerr << "REAL BOARD" << endl;
+        this->state->print_board();
         while(1){
-            // cerr << "Depth: " << depth << endl;
             try{
-                // cerr << __LINE__ << endl;
-                pair<pair<int, int>,vector<int>> result = minimax_mult(state->copy(), depth, player_idx, player_idx);
-                // cerr << __LINE__ << endl;
+                State cpy = this->state->copy();
+                pair<pair<int, int>,vector<int>> result = minimax_mult(cpy, depth, player_idx, player_idx);
+                cerr << "AFTER RUNNING" << endl;
+                cpy.print_board();
+
                 cerr << "Depth: " << depth << " " << result.first.first << " " << result.first.second << endl;
                 cerr << "Values: ";
                 for(int i = 0; i < num_players; i++){
                     cerr << result.second[i] << " ";
-                    if(result.second[i] > MAX_HEURISTIC){
-                        state->print_board();
-                        cerr << "invalid heuristic" << endl;
-                        throw "Invalid Heuristic";
+                    if(ERROR_CHECKS){
+                        if(result.second[i] > MAX_HEURISTIC){
+                            state->print_board();
+                            cerr << "invalid heuristic" << endl;
+                            throw "Invalid Heuristic";
+                        }
                     }
                 }
+            
                 cerr << endl;
                 cerr << "Dead: " << state->dead.size() << endl;
 
-                // try{
                 best_move = move_str(result.first, player_idx);
-                // found = true;
-                // }catch(...){
-                    // best_move = "UP";
-                // }
+
                 if(abs(result.second[player_idx]) == h->max_heuristic()){
                     break;
                 }
@@ -551,12 +705,12 @@ public:
                 break;
             }
 
-            bst = best_move;
         }
+        // bst = best_move;
         // if(!found){
             // best_move = "UP";
         // }
-        return bst;
+        return best_move;
     }
 };
 
@@ -587,31 +741,21 @@ int main(){
             player_state[2] = x1;
             player_state[3] = BY - y1 - 1;
             player_states[i] = player_state;
+            cerr << "Player " << i << ": " << player_state[0] << " " << player_state[1] << " " << player_state[2] << " " << player_state[3] << endl;
         }
 
-        // cerr << __LINE__ << endl;
+        cerr << n << " " << p << endl;
+        timer = clock();
 
         if(!initialized){
-            vector<pair<int, int>> positions;
-            vector<pair<int, int>> initial_pos;
-            for(int i = 0; i < n; i++){
-                initial_pos.push_back(make_pair(player_states[i][0], player_states[i][1]));
-                positions.push_back(make_pair(player_states[i][2], player_states[i][3]));
-            }
-            
-            agent.initialize(n, positions);
-            // agent.fill_squares(initial_pos);
+            agent.initialize(n, player_states);
             initialized = true;
         }
-            agent.update(player_states);
+        agent.update(player_states);
 
-        // agent.fill_squares(initial_pos);
-        // cerr << __LINE__ << endl;
         string move = agent.get_move(p);
-        // cerr << __LINE__ << endl;
 
         agent.state->print_board();
-        // cerr << state.currx << " " << state.curry << endl;
         cerr << player_states[p][0] << " " << player_states[p][1] << " " << player_states[p][2] << " " << player_states[p][3] << endl;
         cerr << p << endl;
 
