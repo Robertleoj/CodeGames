@@ -4,10 +4,15 @@
 #include <algorithm>
 #include<queue>
 #include<set>
+#include<math.h>
 
 #define BX 30
 #define BY 20
 int DIRS[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
+
+
+#define DIST_POWER 1.5
+#define WALL_DIST_MULTIPLIER 1
 
 using namespace std;
 
@@ -114,6 +119,66 @@ public:
         return count;
     }
 
+
+    int min_dist_to_other(int x, int y, int player_idx){
+        int min_dist = 10000;
+        for(int i = 0; i < num_players; i++){
+            if(i == player_idx){
+                continue;
+            }
+            int dist = abs(positions[i].first - x) + abs(positions[i].second - y);
+            if(dist < min_dist){
+                min_dist = dist;
+            }
+        }
+        return min_dist;
+    }
+
+
+    int max_distance_to_block(int x, int y){
+        int max_dist = 0;
+        // check positive x
+        int dst = 0;
+        for(int i = x + 1; i < BX; i++){
+            if(board[i][y] != 0){
+                break;
+            }
+            dst++;
+        }
+        max_dist = max(max_dist, dst);
+        // check negative x
+        dst = 0;
+        for(int i = x - 1; i >= 0; i--){
+            if(board[i][y] != 0){
+                break;
+            }
+            dst++;
+        }
+        max_dist = max(max_dist, dst);
+        // check positive y
+        dst = 0;
+        for(int i = y + 1; i < BY; i++){
+            if(board[x][i] != 0){
+                break;
+            }
+            dst++;
+        }
+        max_dist = max(max_dist, dst);
+
+        // check negative y
+        dst = 0;
+        for(int i = y - 1; i >= 0; i--){
+            if(board[x][i] != 0){
+                break;
+            }
+            dst++;
+        }
+
+        max_dist = max(max_dist, dst);
+        return max_dist;
+
+    }
+
     int enemy_reachable(pair<int,int> &new_position, int player_idx){
         // Get the direction the enemy is facing
         int x = new_position.first;
@@ -215,9 +280,15 @@ public:
                         }
                         // score -= enemy_reachable()
                     }
+
+                    int mdist = max_distance_to_block(hypo_x, hypo_y);
+
                     board[hypo_x][hypo_y] = 0;
 
                     
+                    // score -= pow(mdist,DIST_POWER) ;
+                    score += mdist * WALL_DIST_MULTIPLIER;
+
                     cerr << "score: " << score << endl;
                     if(score > max_reachable){
                         max_reachable = score;

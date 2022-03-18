@@ -11,10 +11,10 @@
 #define BY 20
 
 #define PLAY_CLOCK 100
-#define TIME_SLACK 5
+#define TIME_SLACK 10
 
-#define MIN_HEURISTIC -1000
-#define MAX_HEURISTIC 1000
+#define MIN_HEURISTIC -10000
+#define MAX_HEURISTIC 10000
 
 int DIRS[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
 
@@ -55,7 +55,9 @@ public:
     }
 
     State(int num_players, vector<pair<int, int>> positions, char board[BX][BY]){
-        this->positions = positions;
+        for(auto pos: positions){
+            this->positions.push_back(pos);
+        }
         this->num_players = num_players;
         for(int i = 0; i < BX; i++){
             for(int j = 0; j < BY; j++){
@@ -69,6 +71,14 @@ public:
         // State s = State(this->num_players, this->positions, this->board);
         State s = this->copy();
         s.apply_move(move, player_idx);
+        return s;
+    }
+
+    State copy(){
+        State s(num_players, positions, board);
+        for(auto p : dead){
+            s.dead.insert(p);
+        }
         return s;
     }
 
@@ -100,19 +110,23 @@ public:
 
 
     int num_reachable(pair<int, int> pos){
-        int x = pos.first, y = pos.second;
         // int dirx = DIRS[dir][0];
         // int diry = DIRS[dir][1];
         // int nx = x + dirx;
         // int ny = y + diry;
-        int count = 0;
 
+        // int cur_x = pos.first, cur_y = pos.second;
+        int x = pos.first, y = pos.second;
+        // Take the max count over all directions we can move in
+
+        int count = 0;
         queue<pair<int, int>> q;
 
         // run dfs to see how many squares are reachable
         // q.push_back(make_pair(nx, ny));
         q.push(make_pair(x, y));
         set<pair<int, int>> visited;
+        visited.insert(make_pair(x, y));
         
         pair<int, int> c_pos;
         while(q.size() > 0){
@@ -129,7 +143,7 @@ public:
             for(int i = 0; i < 4; i++){
                 int nx2 = cur_x + DIRS[i][0];
                 int ny2 = cur_y + DIRS[i][1];
-                if(!suicide_move(nx2, ny2) && visited.find(make_pair(nx2, ny2)) == visited.end() && (nx2 != x || ny2 != y)) {
+                if(!suicide_move(nx2, ny2) && visited.find(make_pair(nx2, ny2)) == visited.end() ) {
                     q.push(make_pair(nx2, ny2));
                     visited.insert(make_pair(nx2, ny2));
                     count++;
@@ -143,11 +157,19 @@ public:
 
 
     void apply_move(pair<int, int> move,int player_idx){
+
+        if(move.first == -1 && move.second == -1){
+            if(!is_dead(player_idx)){
+                this->kill(player_idx);
+            }
+            return;
+        }
+        if(is_dead(player_idx)){
+            return;
+        }
+
         if(el_in_set(dead, player_idx)){
             throw runtime_error("Agent already dead");
-        }
-        if(move.first == -1 && move.second == -1){
-            return;
         }
         if(suicide_move(move)){
             cerr << "Sucide move made" << endl;
@@ -173,19 +195,7 @@ public:
         }
     }
 
-    State copy(){
-        State s(num_players, positions);
-        for(int i = 0; i < BX; i++){
-            for(int j = 0; j < BY; j++){
-                s.board[i][j] = board[i][j];
-            }
-        }
 
-        for(auto p : dead){
-            s.dead.insert(p);
-        }
-        return s;
-    }
 
     vector<int> available_moves(int player_idx){
         vector<int> moves;
@@ -199,27 +209,36 @@ public:
 
 
     bool is_allowed(int x, int y, int dir){
-        int dirx = DIRS[dir][0];
-        int diry = DIRS[dir][1];
-        int nx = x + dirx;
-        int ny = y + diry;
-        if(nx < 0 || nx >= BX || ny < 0 || ny >= BY){
-            return false;
-        }
-        if(board[nx][ny] == 0){
-            return true;
-        }
-        return false;
+        // int dirx = DIRS[dir][0];
+        // int diry = DIRS[dir][1];
+        // int nx = x + dirx;
+        // int ny = y + diry;
+        return !suicide_move(x + DIRS[dir][0], y + DIRS[dir][1]);
+        // if(nx < 0 || nx >= BX || ny < 0 || ny >= BY){
+            // return false;
+        // }
+        // if(board[nx][ny] == 0){
+            // return true;
+        // }
+        // return false;
 
     }
 
 
     pair<bool, vector<int>> is_terminal(){
-        if(dead.size() == num_players - 1){
-            vector<int> ret_vect = vector<int>(num_players, MIN_HEURISTIC);
+        if(dead.size() >= num_players - 1){
+            vector<int> ret_vect = vector<int>(num_players);
             for(int i = 0; i < num_players; i++){
-                if(!el_in_set(dead, i)){
+                if(is_dead(i)){
+                    ret_vect[i] = MIN_HEURISTIC;
+                } else {
                     ret_vect[i] = MAX_HEURISTIC;
+                }
+            }
+            for(auto i: ret_vect){
+                if(abs(i) >  MAX_HEURISTIC){
+                    cerr << "Invalid heuristic: terminal heuristic" << endl;
+                    throw runtime_error("Invalid heuristic");
                 }
             }
             return make_pair(true, ret_vect);
@@ -250,11 +269,20 @@ public:
         }
         vector<pair<int, int>> moves;
         for(int i = 0; i < 4; i++){
-            if(is_allowed(positions[player_idx].first, positions[player_idx].second, i)){
-                moves.push_back(make_pair(positions[player_idx].first + DIRS[i][0], positions[player_idx].second + DIRS[i][1]));
+            int nx = positions[player_idx].first + DIRS[i][0];
+            int ny = positions[player_idx].second + DIRS[i][1];
+            if(!suicide_move(nx, ny)){
+                moves.push_back(make_pair(nx, ny));
             }
         }
         return moves;
+    }
+
+
+    void fill_position(pair<int, int> pos, int player_idx){
+        // for(int i = 0; i < positions.size(); i++){
+        this->board[pos.first][pos.second] = player_idx + 1;
+        // }
     }
 
 
@@ -271,6 +299,8 @@ public:
         for(int i = 0; i < state.num_players; i++){
             if(!state.is_dead(i)){
                 reachable[i] = state.num_reachable(state.positions[i]);
+            } else {
+                reachable[i] = 0;
             }
         }
 
@@ -279,6 +309,7 @@ public:
         //     cerr << reachable[i] << " ";
         // }
 
+        // cerr << "Reachable: ";
         for(int i = 0; i < state.num_players; i++){
             if(!state.is_dead(i)){
                 for(int j = 0; j < state.num_players; j++){
@@ -288,10 +319,16 @@ public:
                         vec[i] += reachable[j];
                     }
                 }
+                if(abs(vec[i]) > MAX_HEURISTIC){
+                    cerr << "Invalid heuristic : reachable heuristic" << endl;
+                    throw runtime_error("Invalid heuristic");
+                }
             } else {
                 vec[i] = MIN_HEURISTIC;
             }
+            // cerr << reachable[i] << " ";
         }
+        // cerr << endl;
 
         return vec;
 
@@ -331,9 +368,16 @@ public:
         this->h = new Heuristic();
     }
 
+    // void fill_squares(vector<pair<int, int>> positions){
+        // this->state->fill_positions(positions);
+    // }
+
     void update(vector<vector<int>> states){
         for(int i = 0; i < states.size(); i ++ ){
             this->state->apply_move(pair<int,int>(states[i][2], states[i][3]), i);
+        }
+        for(int i = 0; i < states.size(); i ++){
+            this->state->fill_position(pair<int, int>(states[i][0], states[i][1]), i);
         }
     }
 
@@ -350,6 +394,7 @@ public:
                 return DIR_STRINGS[i];
             }
         }
+        cerr << "Invalid move" << endl;
         throw runtime_error("Invalid move");
     }
 
@@ -362,52 +407,86 @@ public:
     }
 
     bool time_out(){
-        return (time_elapsed() - TIME_SLACK) > PLAY_CLOCK;
+        return (time_elapsed() + TIME_SLACK) > PLAY_CLOCK;
     }
 
-    pair<pair<int, int>,vector<int>> minimax_mult(State state, int depth, int player_idx, int main_player){
-
+    pair<pair<int, int>,vector<int>> minimax_mult(State s, int depth, int player_idx, int main_player){
+        // cout << "Depth: " << depth << endl;
+        // cout << "Player: " << player_idx << endl;
+        // s.print_board();
         if(time_out()){
             throw timeOutException;
         }
 
         // cerr << __LINE__ << endl;
-        pair<bool, vector<int>> term = state.is_terminal();
+        pair<bool, vector<int>> term = s.is_terminal();
         if(term.first){
+            for(auto v: term.second){
+                if(abs(v) > MAX_HEURISTIC){
+                    cerr << "Invalid heuristic: terminal heuristic" << endl;
+                    throw runtime_error("Invalid heuristic");
+                }
+            }
             return pair<pair<int, int>,vector<int>>(null_move(), term.second);
         }
 
+        if(s.is_dead(main_player)){
+            vector<int> ret_vect = vector<int>(s.num_players);
+            for(int i = 0; i < s.num_players; i++){
+                if(!s.is_dead(i)){
+                    ret_vect[i] = MIN_HEURISTIC;
+                } else {
+                    ret_vect[i] = MAX_HEURISTIC;
+                }
+                if(abs(ret_vect[i]) > MAX_HEURISTIC){
+                    cerr << "Invalid heuristic : dead heuristic" << endl;
+                    throw runtime_error("Invalid heuristic");
+                }
+            }
+
+            return pair<pair<int, int>,vector<int>>(null_move(), ret_vect);
+        }
+
         // cerr << __LINE__ << endl;
-        if(depth == 0 || state.is_dead(main_player)){
+        if(depth == 0){
             // cerr << __LINE__ << endl;
             if(time_out()){
                 throw timeOutException;
             }
-            return pair<pair<int, int>, vector<int>>(null_move(), h->evaluate(state));
+            auto evaluated = h->evaluate(s);
+            // for(auto v : evaluated){
+            //     if(abs(v) > MAX_HEURISTIC){
+            //         cerr << "Invalid heuristic : evaluate heuristic" << endl;
+            //         throw runtime_error("Invalid heuristic");
+            //     }
+            // }
+            return pair<pair<int, int>, vector<int>>(null_move(), evaluated);
         }
 
         // cerr << __LINE__ << endl;
-        if(state.is_dead(player_idx)){
-            return minimax_mult(state, depth, (player_idx + 1) % num_players, main_player);
+        if(s.is_dead(player_idx)){
+            return minimax_mult(s, depth + 1, (player_idx + 1) % num_players, main_player);
         }
 
 
         // cerr << __LINE__ << endl;
-        vector<pair<int, int>> moves = state.get_available_moves(player_idx);
+        vector<pair<int, int>> moves = s.get_available_moves(player_idx);
         if(moves.size() == 0){
-            state.kill(player_idx);
-            return minimax_mult(state, depth, (player_idx + 1) % num_players, main_player);
+            s.kill(player_idx);
+            cerr << "Found no moves" << endl;
+            return minimax_mult(s, depth + 1, (player_idx + 1) % num_players, main_player);
         }
 
+
         // cerr << __LINE__ << endl;
-        int value = h->min_heuristic();
-        vector<int> value_vec = vector<int>(moves.size(), value);
+        int value = MIN_HEURISTIC - 1;
+        vector<int> value_vec = vector<int>(moves.size());
         pair<int, int> best_move;
         best_move = moves[0];
         // cerr << __LINE__ << endl;
         for(auto &move: moves){
             pair<pair<int, int>,vector<int>> result = minimax_mult(
-                state.move_applied(move, player_idx), 
+                s.move_applied(move, player_idx), 
                 depth - 1, 
                 (player_idx + 1) % num_players,
                 main_player
@@ -416,6 +495,12 @@ public:
                 value = result.second[player_idx];
                 value_vec = result.second;
                 best_move = move;
+            }
+        }
+        for(auto v: value_vec){
+            if(abs(v) > MAX_HEURISTIC){
+                cerr << "Invalid heuristic : minimax_mult heuristic" << endl;
+                throw runtime_error("Invalid heuristic");
             }
         }
 
@@ -428,6 +513,8 @@ public:
         timer = clock();
         int depth = 1;
 
+        // bool found = false;
+        string bst = "";
         while(1){
             // cerr << "Depth: " << depth << endl;
             try{
@@ -438,17 +525,21 @@ public:
                 cerr << "Values: ";
                 for(int i = 0; i < num_players; i++){
                     cerr << result.second[i] << " ";
+                    if(result.second[i] > MAX_HEURISTIC){
+                        state->print_board();
+                        cerr << "invalid heuristic" << endl;
+                        throw "Invalid Heuristic";
+                    }
                 }
                 cerr << endl;
                 cerr << "Dead: " << state->dead.size() << endl;
 
-                try{
-                    best_move = move_str(result.first, player_idx);
-                }catch(...){
-                    if(best_move == ""){
-                        best_move = "UP";
-                    }
-                }
+                // try{
+                best_move = move_str(result.first, player_idx);
+                // found = true;
+                // }catch(...){
+                    // best_move = "UP";
+                // }
                 if(abs(result.second[player_idx]) == h->max_heuristic()){
                     break;
                 }
@@ -458,11 +549,13 @@ public:
             catch(TimeOutException){
                 break;
             }
+
+            bst = best_move;
         }
-        if(best_move == ""){
-            best_move = "UP";
-        }
-        return best_move;
+        // if(!found){
+            // best_move = "UP";
+        // }
+        return bst;
     }
 };
 
@@ -499,14 +592,19 @@ int main(){
 
         if(!initialized){
             vector<pair<int, int>> positions;
+            vector<pair<int, int>> initial_pos;
             for(int i = 0; i < n; i++){
-                positions.push_back(make_pair(player_states[i][0], player_states[i][1]));
+                initial_pos.push_back(make_pair(player_states[i][0], player_states[i][1]));
+                positions.push_back(make_pair(player_states[i][2], player_states[i][3]));
             }
+            
             agent.initialize(n, positions);
+            // agent.fill_squares(initial_pos);
             initialized = true;
         }
+            agent.update(player_states);
 
-        agent.update(player_states);
+        // agent.fill_squares(initial_pos);
         // cerr << __LINE__ << endl;
         string move = agent.get_move(p);
         // cerr << __LINE__ << endl;
@@ -520,5 +618,6 @@ int main(){
         // To debug: cerr << "Debug messages..." << endl;
 
         cout << move << endl; // A single line with UP, DOWN, LEFT or RIGHT
+        // exit(0);
     }
 }
