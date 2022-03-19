@@ -27,7 +27,7 @@
 
 // Hyperparameters for evaluation
 
-#define SQUARE_WEIGHT 10
+#define SQUARE_WEIGHT 5
 #define ENEMY_WEIGHT 1
 // #define FIRST_REACHABLE_WEIGHT 10
 #define DEGREE_WEIGHT 1
@@ -136,27 +136,31 @@ class State{
 public:
 
     // The moves of each agent, so we can undo moves
-    vector<vector<Sq>> move_sequences;
+    vector<Sq> * move_sequences;
 
     // The board
     char board[BX][BY];
 
     // The current positions of the agents
-    vector<Sq> positions;
+    Sq * positions;
 
     // The number of agents
     int num_players;
 
     // Set of dead agents
-    set<int> dead;
+    bool * dead;
 
     State(int num_players, vector<vector<char>> &player_states){
         // Constructor we use for initial state
+        dead = new bool[num_players];
+        for(int i = 0; i < num_players; i++){
+            dead[i] = false;
+        }
 
         // Initialize num players, positions, and move sequences
         this-> num_players = num_players;
-        this->positions = vector<Sq>();
-        this->move_sequences = vector<vector<Sq>>(num_players);
+        this->positions = new Sq[num_players];
+        this->move_sequences = new vector<Sq>[num_players];
 
         // go throuh each player's state
         for(int i = 0; i < num_players; i++){
@@ -178,7 +182,7 @@ public:
             }
 
             // Set the position to the second coordinate
-            this->positions.push_back(nSq(snd_x, snd_y));
+            positions[i] = nSq(snd_x, snd_y);
             
 
             // Also initialize the board
@@ -188,24 +192,28 @@ public:
 
     }
 
-    State(int num_players, vector<Sq> &positions){
+    State(int num_players, Sq *positions){
         // constructor we use internally to copy the state and such
 
         // initialize positions, num players, and move sequences
-        this->positions = vector<Sq>();
+        this->positions = new Sq[num_players];
         this->num_players = num_players;
-        this->move_sequences = vector<vector<Sq>>(num_players);
+        this->move_sequences = new vector<Sq>[num_players];
+
+        // initialize dead
+        dead = new bool[num_players];
+        for(int i = 0; i < num_players; i++){
+            dead[i] = false;
+        }
 
         // Copy positions
         for(int i = 0; i < num_players; i++){
             this->move_sequences[i] = vector<Sq>();
-        }
-        for(auto pos: positions){
-            this->positions.push_back(pos);
+            this->positions[i] = positions[i];
         }
     }
 
-    State(int num_players, vector<Sq> &positions, char board[BX][BY]): State(num_players, positions){
+    State(int num_players, Sq *positions, char board[BX][BY]): State(num_players, positions){
         // Another internally used constructor that also copies the board
 
         for(int i = 0; i < BX; i++){
@@ -223,9 +231,7 @@ public:
         State s(num_players, positions, board);
 
         // Copy the dead set
-        for(auto p : dead){
-            s.dead.insert(p);
-        }
+        copy_arr(s.dead, dead, num_players);
 
         // copy move sequence
         for(int i = 0; i < num_players; i++){
@@ -413,9 +419,9 @@ public:
                             //     }
                             // }
                         }
-                        // if(!suicide){
-                        //     counts[i] += DEGREE_WEIGHT;
-                        // }
+                        if(!suicide){
+                            counts[i] += DEGREE_WEIGHT;
+                        }
                     }
                 }
             }
@@ -493,7 +499,7 @@ public:
         this->move_sequences[player_idx].pop_back();
 
         // Remove the player from the dead set
-        this->dead.erase(player_idx);
+        this->dead[player_idx] = false;
     }
 
     void undo_move(int player_idx){
@@ -540,12 +546,12 @@ public:
     void kill(int player_idx){
 
         // If the agent is dead, we shouldnt be calling this function
-        if(el_in_set(dead, player_idx)){
+        if(is_dead(player_idx)){
             throw runtime_error("Already dead");
         }
 
         // Insert the player into the dead set
-        dead.insert(player_idx);
+        dead[player_idx] = true;
 
         // Insert a dead move into the move sequence
         move_sequences[player_idx].push_back(die_move());
@@ -574,6 +580,15 @@ public:
     //     return !suicide_move(x + DIRS[dir][0], y + DIRS[dir][1]);
     // }
 
+    int num_dead(){
+        int num_dead = 0;
+        for(int i = 0; i < num_players; i++){
+            if(dead[i])
+                num_dead ++;
+        }
+        return num_dead;
+    }
+
 
     bool is_terminal(int scores[]){
         // Is the state a terminal state?
@@ -584,7 +599,8 @@ public:
         // MIN_HEURISTIC for each losing player and MAX_HEURISTIC for each winning player
 
         // check_time(timer);
-        if(dead.size() >= num_players - 1){
+
+        if(num_dead() >= num_players - 1){
             // If there is only one player left alive, we return true
 
 
@@ -611,7 +627,7 @@ public:
 
     bool is_dead(int player_idx){
         // Simply check whether the player is in the dead set
-        return el_in_set(dead, player_idx);
+        return dead[player_idx];
     }
 
     void print_board(){
@@ -673,8 +689,10 @@ public:
         // state.num_reachable3(scores);
 
         // Each dead player gets the minimum heuristic
-        for(auto p: state.dead){
-            scores[p] = MIN_HEURISTIC;
+        for(int i = 0; i < state.num_players; i++){
+            if(state.is_dead(i)){
+                scores[i] = MIN_HEURISTIC;
+            }
         }
     }
 
@@ -777,11 +795,11 @@ public:
         cerr << "Invalid move. Player:  " 
              << player_idx  
              << " moving from "
-             << state->positions[player_idx].x 
+             << (int)state->positions[player_idx].x 
              <<" " 
-             << state->positions[player_idx].y
+             << (int)state->positions[player_idx].y
              << " to "
-             << move.x << " " << move.y << endl;
+             << (int)move.x << " " <<(int) move.y << endl;
         cerr << "On board" << endl;
         this->state->print_board();
 
@@ -829,24 +847,6 @@ public:
 
         // Get all the available moves
         vector<Sq> moves = s.get_available_moves(player_idx);
-        // cerr << "Got available moves for player " << player_idx << endl;
-        // for (auto m : moves){
-            // cerr << m.first << " " << m.second << endl;
-        // }
-        // cerr  << "from " << s.positions[player_idx].first << " " << s.positions[player_idx].second << endl;
-
-        // cerr << "On board" << endl;
-        // s.print_board();
-
-        // There should always be a move, as we use a die move
-
-        // if(moves.size() == 0){
-        //     cerr << "Found no moves" << endl;
-        //     s.apply_move(die_move(), player_idx);
-        //     auto res = minimax_mult(s, depth - 1, (player_idx + 1) % num_players, main_player);
-        //     s.undo_move(player_idx);
-        //     return make_pair(die_move(), res.second);
-        // }
 
         // Do the minimax search for each move
         int value = MIN_HEURISTIC - 1; // Initialize value at impossibly low value
@@ -935,7 +935,7 @@ public:
                 }
                 // check_time(timer);
                 cerr << endl;
-                cerr << "Dead: " << state->dead.size() << endl;
+                cerr << "Dead: " << state->num_dead() << endl;
 
                 // Get the string value of the best move
                 best_move = move_str(result, player_idx);
