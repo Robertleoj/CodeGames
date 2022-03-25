@@ -26,6 +26,7 @@ public:
     ~Player(){
         close(ifp);
         close(ofp);
+        system((((string) "kill ") + to_string(pid)).c_str());
     }
 
     void start(){
